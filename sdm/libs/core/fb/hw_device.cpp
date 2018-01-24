@@ -242,6 +242,23 @@ DisplayError HWDevice::Validate(HWLayers *hw_layers) {
         mdp_layer.pipe_ndx = pipe_info->pipe_id;
         mdp_layer.horz_deci = pipe_info->horizontal_decimation;
         mdp_layer.vert_deci = pipe_info->vertical_decimation;
+#ifdef MDP_COMMIT_RECT_NUM
+        mdp_layer.rect_num = pipe_info->rect;
+#endif
+
+#ifdef DISPLAY_SHIFT_HORIZONTAL
+        if (device_type_ == kDevicePrimary) {
+          pipe_info->dst_roi.left += DISPLAY_SHIFT_HORIZONTAL;
+          pipe_info->dst_roi.right += DISPLAY_SHIFT_HORIZONTAL;
+        }
+#endif
+
+#ifdef DISPLAY_SHIFT_VERTICAL
+        if (device_type_ == kDevicePrimary) {
+          pipe_info->dst_roi.top += DISPLAY_SHIFT_VERTICAL;
+          pipe_info->dst_roi.bottom += DISPLAY_SHIFT_VERTICAL;
+        }
+#endif
 
         SetRect(pipe_info->src_roi, &mdp_layer.src_rect);
         SetRect(pipe_info->dst_roi, &mdp_layer.dst_rect);
@@ -350,6 +367,9 @@ DisplayError HWDevice::Validate(HWLayers *hw_layers) {
   mdp_commit.dest_scaler_cnt = UINT32(hw_layer_info.dest_scale_info_map.size());
 
   mdp_commit.flags |= MDP_VALIDATE_LAYER;
+#ifdef MDP_COMMIT_RECT_NUM
+  mdp_commit.flags |= MDP_COMMIT_RECT_NUM;
+#endif
   if (Sys::ioctl_(device_fd_, INT(MSMFB_ATOMIC_COMMIT), &mdp_disp_commit_) < 0) {
     if (errno == ESHUTDOWN) {
       DLOGI_IF(kTagDriverConfig, "Driver is processing shutdown sequence");
@@ -1137,8 +1157,8 @@ DisplayError HWDevice::SetCursorPosition(HWLayers *hw_layers, int x, int y) {
   async_layer.pipe_ndx = left_pipe->pipe_id;
   async_layer.src.x = UINT32(left_pipe->src_roi.left);
   async_layer.src.y = UINT32(left_pipe->src_roi.top);
-  async_layer.dst.x = UINT32(x);
-  async_layer.dst.y = UINT32(y);
+  async_layer.dst.x = UINT32(left_pipe->dst_roi.left);
+  async_layer.dst.y = UINT32(left_pipe->dst_roi.top);
 
   mdp_position_update pos_update = {};
   pos_update.input_layer_cnt = 1;
