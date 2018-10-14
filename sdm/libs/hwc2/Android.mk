@@ -15,17 +15,25 @@ LOCAL_CFLAGS                  := -Wno-missing-field-initializers -Wno-unused-par
                                  -std=c++11 -fcolor-diagnostics\
                                  -DLOG_TAG=\"SDM\" $(common_flags) \
                                  -I $(display_top)/sdm/libs/hwc
+ifeq ($(TARGET_EXCLUDES_DISPLAY_PP), true)
+LOCAL_CFLAGS += -DEXCLUDE_DISPLAY_PP
+endif
+
 LOCAL_CLANG                   := true
 
 # TODO: Remove libui after addressing gpu_tonemapper issues
 LOCAL_SHARED_LIBRARIES        := libsdmcore libqservice libbinder libhardware libhardware_legacy \
                                  libutils libcutils libsync libqdutils libqdMetaData libdl libdrmutils \
                                  libsdmutils libc++ liblog libgrallocutils libdl \
-                                 vendor.display.config@1.0_vendor libhidlbase libhidltransport \
+                                 vendor.display.config@1.0 libhidlbase libhidltransport \
                                  libui libgpu_tonemapper libbfqio_vendor
 
 ifneq ($(TARGET_USES_GRALLOC1), true)
     LOCAL_SHARED_LIBRARIES += libmemalloc
+endif
+
+ifeq ($(display_config_version), DISPLAY_CONFIG_1_1)
+LOCAL_SHARED_LIBRARIES        += vendor.display.config@1.1
 endif
 
 LOCAL_SRC_FILES               := hwc_session.cpp \

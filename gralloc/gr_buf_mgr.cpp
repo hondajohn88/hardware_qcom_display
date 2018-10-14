@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2017 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2011-2018 The Linux Foundation. All rights reserved.
  * Not a Contribution
  *
  * Copyright (C) 2010 The Android Open Source Project
@@ -43,7 +43,7 @@ BufferManager::BufferManager() : next_id_(0) {
   char property[PROPERTY_VALUE_MAX];
 
   // Map framebuffer memory
-  if ((property_get("debug.gralloc.map_fb_memory", property, NULL) > 0) &&
+  if ((property_get(MAP_FB_MEMORY_PROP, property, NULL) > 0) &&
       (!strncmp(property, "1", PROPERTY_VALUE_MAX) ||
        (!strncasecmp(property, "true", PROPERTY_VALUE_MAX)))) {
     map_fb_mem_ = true;
@@ -419,7 +419,7 @@ int BufferManager::GetHandleFlags(int format, gralloc1_producer_usage_t prod_usa
     flags |= private_handle_t::PRIV_FLAGS_HW_TEXTURE;
   }
 
-  if (prod_usage & GRALLOC1_CONSUMER_USAGE_PRIVATE_SECURE_DISPLAY) {
+  if (cons_usage & GRALLOC1_CONSUMER_USAGE_PRIVATE_SECURE_DISPLAY) {
     flags |= private_handle_t::PRIV_FLAGS_SECURE_DISPLAY;
   }
 
@@ -676,7 +676,6 @@ gralloc1_error_t BufferManager::Perform(int operation, va_list args) {
       }
 
       *color_space = 0;
-#ifdef USE_COLOR_METADATA
       ColorMetaData color_metadata;
       if (getMetaData(hnd, GET_COLOR_METADATA, &color_metadata) == 0) {
         switch (color_metadata.colorPrimaries) {
@@ -694,11 +693,9 @@ gralloc1_error_t BufferManager::Perform(int operation, va_list args) {
             break;
         }
         break;
-      }
-      if (getMetaData(hnd, GET_COLOR_SPACE, &color_metadata) != 0) {
+      } else if (getMetaData(hnd, GET_COLOR_SPACE, color_space) != 0) {
           *color_space = 0;
       }
-#endif
     } break;
     case GRALLOC_MODULE_PERFORM_GET_YUV_PLANE_INFO: {
       private_handle_t *hnd = va_arg(args, private_handle_t *);

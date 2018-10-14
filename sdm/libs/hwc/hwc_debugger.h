@@ -34,7 +34,7 @@
 
 #include <core/sdm_types.h>
 #include <core/debug_interface.h>
-#include <cutils/log.h>
+#include <log/log.h>
 #include <utils/Trace.h>
 #include <bitset>
 
@@ -51,7 +51,10 @@ class HWCDebugHandler : public DebugHandler {
   static void DebugCompManager(bool enable, int verbose_level);
   static void DebugDriverConfig(bool enable, int verbose_level);
   static void DebugRotator(bool enable, int verbose_level);
+  static void DebugScalar(bool enable, int verbose_level);
   static void DebugQdcm(bool enable, int verbose_level);
+  static void DebugClient(bool enable, int verbose_level);
+  static void DebugDisplay(bool enable, int verbose_level);
   static int  GetIdleTimeoutMs();
 
   virtual void Error(DebugTag tag, const char *format, ...);

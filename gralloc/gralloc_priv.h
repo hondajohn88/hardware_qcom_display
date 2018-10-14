@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2017, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2011-2018, The Linux Foundation. All rights reserved.
  * Not a Contribution
  *
  * Copyright (C) 2008 The Android Open Source Project
@@ -22,6 +22,13 @@
 
 #include <unistd.h>
 #include "gr_priv_handle.h"
+
+#define GRALLOC_PROP_PREFIX  "vendor.gralloc."
+#define GRALLOC_PROP(prop_name) GRALLOC_PROP_PREFIX prop_name
+
+#define DISABLE_UBWC_PROP                    GRALLOC_PROP("disable_ubwc")
+#define ENABLE_FB_UBWC_PROP                  GRALLOC_PROP("enable_fb_ubwc")
+#define MAP_FB_MEMORY_PROP                   GRALLOC_PROP("map_fb_memory")
 
 #define ROUND_UP_PAGESIZE(x) roundUpToPageSize(x)
 inline int roundUpToPageSize(int x) {
@@ -58,10 +65,10 @@ inline int roundUpToPageSize(int x) {
 /* Consumer flags */
 /* TODO(user): Fix when producer and consumer flags are actually separated */
 /* This flag is set for WFD usecase */
-#define GRALLOC1_CONSUMER_USAGE_PRIVATE_WFD            0x00200000
+#define GRALLOC1_CONSUMER_USAGE_PRIVATE_WFD            (UINT32_C(1) << 21)
 
 /* This flag is used for SECURE display usecase */
-#define GRALLOC1_CONSUMER_USAGE_PRIVATE_SECURE_DISPLAY 0x01000000
+#define GRALLOC1_CONSUMER_USAGE_PRIVATE_SECURE_DISPLAY (UINT32_C(1) << 31)
 
 /* Buffer content should be displayed on a primary display only */
 #define GRALLOC1_CONSUMER_USAGE_PRIVATE_INTERNAL_ONLY  0x04000000

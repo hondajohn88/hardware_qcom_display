@@ -484,14 +484,6 @@ class DisplayInterface {
   */
   virtual DisplayError SetPanelBrightness(int level) = 0;
 
-  /*! @brief Method to cache brightness of the primary display.
-
-    @param[in] level the new backlight level.
-
-    @return \link DisplayError \endlink
-  */
-  virtual DisplayError CachePanelBrightness(int level) = 0;
-
   /*! @brief Method to notify display about change in min HDCP encryption level.
 
     @param[in] min_enc_level minimum encryption level value.
@@ -677,6 +669,12 @@ class DisplayInterface {
   virtual DisplayError GetClientTargetSupport(uint32_t width, uint32_t height,
                                               LayerBufferFormat format,
                                               const ColorMetaData &color_metadata) = 0;
+
+  /*
+   * Returns a string consisting of a dump of SDM's display and layer related state
+   * as programmed to driver
+  */
+  virtual std::string Dump() = 0;
 
  protected:
   virtual ~DisplayInterface() { }

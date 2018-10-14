@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014-2017, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2014-2018, The Linux Foundation. All rights reserved.
  * Not a Contribution.
  *
  * Copyright 2015 The Android Open Source Project
@@ -89,8 +89,11 @@ HWC2::Error HWCColorMode::DeInit() {
 uint32_t HWCColorMode::GetColorModeCount() {
   uint32_t count = UINT32(color_mode_transform_map_.size());
   DLOGI("Supported color mode count = %d", count);
-
+#ifdef EXCLUDE_DISPLAY_PP
+  return count;
+#else
   return std::max(1U, count);
+#endif
 }
 
 HWC2::Error HWCColorMode::GetColorModes(uint32_t *out_num_modes,
@@ -119,13 +122,14 @@ HWC2::Error HWCColorMode::SetColorMode(android_color_mode_t mode) {
     DLOGE("failed for mode = %d", mode);
   }
 
+  DLOGV_IF(kTagClient, "Color mode %d successfully set.", mode);
   return status;
 }
 
 HWC2::Error HWCColorMode::RestoreColorTransform() {
   DisplayError error = display_intf_->SetColorTransform(kColorTransformMatrixCount, color_matrix_);
   if (error != kErrorNone) {
-    DLOGE("Failed to set Color Transform");
+    DLOGI_IF(kTagClient,"Failed to set Color Transform");
     return HWC2::Error::BadParameter;
   }
 
@@ -133,11 +137,7 @@ HWC2::Error HWCColorMode::RestoreColorTransform() {
 }
 
 HWC2::Error HWCColorMode::SetColorTransform(const float *matrix, android_color_transform_t hint) {
-  if (!matrix || (hint < HAL_COLOR_TRANSFORM_IDENTITY ||
-      hint > HAL_COLOR_TRANSFORM_CORRECT_TRITANOPIA)) {
-    return HWC2::Error::BadParameter;
-  }
-
+  DTRACE_SCOPED();
   double color_matrix[kColorTransformMatrixCount] = {0};
   CopyColorTransformMatrix(matrix, color_matrix);
 
@@ -202,19 +202,21 @@ void HWCColorMode::PopulateColorModes() {
   // SDM returns modes which is string combination of mode + transform.
   DisplayError error = display_intf_->GetColorModeCount(&color_mode_count);
   if (error != kErrorNone || (color_mode_count == 0)) {
+#ifndef EXCLUDE_DISPLAY_PP
     DLOGW("GetColorModeCount failed, use native color mode");
     PopulateTransform(HAL_COLOR_MODE_NATIVE, "native", "identity");
+#endif
     return;
   }
 
-  DLOGV_IF(kTagQDCM, "Color Modes supported count = %d", color_mode_count);
+  DLOGV_IF(kTagClient, "Color Modes supported count = %d", color_mode_count);
 
   const std::string color_transform = "identity";
   std::vector<std::string> color_modes(color_mode_count);
   error = display_intf_->GetColorModes(&color_mode_count, &color_modes);
   for (uint32_t i = 0; i < color_mode_count; i++) {
     std::string &mode_string = color_modes.at(i);
-    DLOGV_IF(kTagQDCM, "Color Mode[%d] = %s", i, mode_string.c_str());
+    DLOGV_IF(kTagClient, "Color Mode[%d] = %s", i, mode_string.c_str());
     AttrVal attr;
     error = display_intf_->GetColorModeAttr(mode_string, &attr);
     std::string color_gamut, dynamic_range, pic_quality;
@@ -228,6 +230,10 @@ void HWCColorMode::PopulateColorModes() {
           pic_quality = it.second;
         }
       }
+
+      DLOGV_IF(kTagClient, "color_gamut : %s, dynamic_range : %s, pic_quality : %s",
+               color_gamut.c_str(), dynamic_range.c_str(), pic_quality.c_str());
+
       if (dynamic_range == kHdr) {
         continue;
       }
@@ -357,13 +363,13 @@ int HWCDisplay::Init() {
   }
 
   validated_.reset();
-  HWCDebugHandler::Get()->GetProperty("sys.hwc_disable_hdr", &disable_hdr_handling_);
+  HWCDebugHandler::Get()->GetProperty(DISABLE_HDR, &disable_hdr_handling_);
   if (disable_hdr_handling_) {
     DLOGI("HDR Handling disabled");
   }
 
   int property_swap_interval = 1;
-  HWCDebugHandler::Get()->GetProperty("debug.egl.swapinterval", &property_swap_interval);
+  HWCDebugHandler::Get()->GetProperty(ZERO_SWAP_INTERVAL, &property_swap_interval);
   if (property_swap_interval == 0) {
     swap_interval_zero_ = true;
   }
@@ -371,7 +377,7 @@ int HWCDisplay::Init() {
   client_target_ = new HWCLayer(id_, buffer_allocator_);
 
   int blit_enabled = 0;
-  HWCDebugHandler::Get()->GetProperty("persist.hwc.blit.comp", &blit_enabled);
+  HWCDebugHandler::Get()->GetProperty(DISABLE_BLIT_COMPOSITION_PROP, &blit_enabled);
   if (needs_blit_ && blit_enabled) {
     // TODO(user): Add blit engine when needed
   }
@@ -401,6 +407,9 @@ int HWCDisplay::Deinit() {
   }
 
   delete client_target_;
+  for (auto hwc_layer : layer_set_) {
+    delete hwc_layer;
+  }
 
   if (color_mode_) {
     color_mode_->DeInit();
@@ -420,6 +429,8 @@ HWC2::Error HWCDisplay::CreateLayer(hwc2_layer_t *out_layer_id) {
   *out_layer_id = layer->GetId();
   geometry_changes_ |= GeometryChanges::kAdded;
   validated_.reset();
+  layer_stack_invalid_ = true;
+
   return HWC2::Error::None;
 }
 
@@ -452,6 +463,8 @@ HWC2::Error HWCDisplay::DestroyLayer(hwc2_layer_t layer_id) {
 
   geometry_changes_ |= GeometryChanges::kRemoved;
   validated_.reset();
+  layer_stack_invalid_ = true;
+
   return HWC2::Error::None;
 }
 
@@ -462,6 +475,7 @@ void HWCDisplay::BuildLayerStack() {
   metadata_refresh_rate_ = 0;
   auto working_primaries = ColorPrimaries_BT709_5;
   bool secure_display_active = false;
+  layer_stack_.flags.animating = animating_;
 
   // Add one layer for fb target
   // TODO(user): Add blit target layers
@@ -493,6 +507,7 @@ void HWCDisplay::BuildLayerStack() {
       }
     }
 
+    bool is_secure = false;
     const private_handle_t *handle =
         reinterpret_cast<const private_handle_t *>(layer->input_buffer.buffer_id);
     if (handle) {
@@ -504,21 +519,17 @@ void HWCDisplay::BuildLayerStack() {
         layer_stack_.flags.video_present = true;
       }
       // TZ Protected Buffer - L1
-      if (handle->flags & private_handle_t::PRIV_FLAGS_SECURE_BUFFER) {
-        layer_stack_.flags.secure_present = true;
-      }
       // Gralloc Usage Protected Buffer - L3 - which needs to be treated as Secure & avoid fallback
-      if (handle->flags & private_handle_t::PRIV_FLAGS_PROTECTED_BUFFER) {
+      if (handle->flags & private_handle_t::PRIV_FLAGS_PROTECTED_BUFFER ||
+          handle->flags & private_handle_t::PRIV_FLAGS_SECURE_BUFFER) {
         layer_stack_.flags.secure_present = true;
+        is_secure = true;
       }
-    }
-
-    if (layer->flags.skip) {
-      layer_stack_.flags.skip_present = true;
     }
 
     if (layer->input_buffer.flags.secure_display) {
       secure_display_active = true;
+      is_secure = true;
     }
 
     if (hwc_layer->GetClientRequestedCompositionType() == HWC2::Composition::Cursor) {
@@ -536,6 +547,15 @@ void HWCDisplay::BuildLayerStack() {
       // dont honor HDR when its handling is disabled
       layer->input_buffer.flags.hdr = true;
       layer_stack_.flags.hdr_present = true;
+    }
+
+    if (hwc_layer->IsNonIntegralSourceCrop() && !is_secure && !hdr_layer &&
+        !layer->flags.single_buffer && !layer->flags.solid_fill) {
+      layer->flags.skip = true;
+    }
+
+    if (layer->flags.skip) {
+      layer_stack_.flags.skip_present = true;
     }
 
     // TODO(user): Move to a getter if this is needed at other places
@@ -606,6 +626,8 @@ void HWCDisplay::BuildLayerStack() {
 
   // set secure display
   SetSecureDisplay(secure_display_active);
+
+  layer_stack_invalid_ = false;
 }
 
 void HWCDisplay::BuildSolidFillStack() {
@@ -949,6 +971,7 @@ DisplayError HWCDisplay::CECMessage(char *message) {
 DisplayError HWCDisplay::HandleEvent(DisplayEvent event) {
   switch (event) {
     case kIdleTimeout:
+      break;
     case kThermalEvent:
       validated_.reset();
       break;
@@ -1146,8 +1169,8 @@ HWC2::Error HWCDisplay::GetHdrCapabilities(uint32_t *out_num_types, int32_t *out
 
 
 HWC2::Error HWCDisplay::CommitLayerStack(void) {
-  if (shutdown_pending_ || layer_set_.empty()) {
-    return HWC2::Error::None;
+  if (flush_) {
+     return HWC2::Error::None;
   }
 
   if (skip_validate_ && !CanSkipValidate()) {
@@ -1155,43 +1178,46 @@ HWC2::Error HWCDisplay::CommitLayerStack(void) {
   }
 
   if (!validated_.test(type_)) {
-    DLOGV_IF(kTagCompManager, "Display %d is not validated", id_);
+    DLOGV_IF(kTagClient, "Display %d is not validated", id_);
     return HWC2::Error::NotValidated;
+  }
+
+  if (shutdown_pending_ || layer_set_.empty()) {
+    return HWC2::Error::None;
   }
 
   DumpInputBuffers();
 
-  if (!flush_) {
-    DisplayError error = kErrorUndefined;
-    int status = 0;
-    if (tone_mapper_) {
-      if (layer_stack_.flags.hdr_present) {
-        status = tone_mapper_->HandleToneMap(&layer_stack_);
-        if (status != 0) {
-          DLOGE("Error handling HDR in ToneMapper");
-        }
-      } else {
-        tone_mapper_->Terminate();
+  DisplayError error = kErrorUndefined;
+  int status = 0;
+  if (tone_mapper_) {
+    if (layer_stack_.flags.hdr_present) {
+      status = tone_mapper_->HandleToneMap(&layer_stack_);
+      if (status != 0) {
+        DLOGE("Error handling HDR in ToneMapper");
       }
-    }
-    error = display_intf_->Commit(&layer_stack_);
-
-    if (error == kErrorNone) {
-      // A commit is successfully submitted, start flushing on failure now onwards.
-      flush_on_error_ = true;
     } else {
-      if (error == kErrorShutDown) {
-        shutdown_pending_ = true;
-        return HWC2::Error::Unsupported;
-      } else if (error == kErrorNotValidated) {
-        validated_.reset(type_);
-        return HWC2::Error::NotValidated;
-      } else if (error != kErrorPermission) {
-        DLOGE("Commit failed. Error = %d", error);
-        // To prevent surfaceflinger infinite wait, flush the previous frame during Commit()
-        // so that previous buffer and fences are released, and override the error.
-        flush_ = true;
-      }
+      tone_mapper_->Terminate();
+    }
+  }
+
+  error = display_intf_->Commit(&layer_stack_);
+
+  if (error == kErrorNone) {
+    // A commit is successfully submitted, start flushing on failure now onwards.
+    flush_on_error_ = true;
+  } else {
+    if (error == kErrorShutDown) {
+      shutdown_pending_ = true;
+      return HWC2::Error::Unsupported;
+    } else if (error == kErrorNotValidated) {
+      validated_.reset(type_);
+      return HWC2::Error::NotValidated;
+    } else if (error != kErrorPermission) {
+      DLOGE("Commit failed. Error = %d", error);
+      // To prevent surfaceflinger infinite wait, flush the previous frame during Commit()
+      // so that previous buffer and fences are released, and override the error.
+      flush_ = true;
     }
   }
 
@@ -1231,21 +1257,28 @@ HWC2::Error HWCDisplay::PostCommitLayerStack(int32_t *out_retire_fence) {
       // release fences and discard fences from driver
       if (swap_interval_zero_ || layer->flags.single_buffer) {
         close(layer_buffer->release_fence_fd);
-        layer_buffer->release_fence_fd = -1;
       } else if (layer->composition != kCompositionGPU) {
         hwc_layer->PushReleaseFence(layer_buffer->release_fence_fd);
-        layer_buffer->release_fence_fd = -1;
       } else {
         hwc_layer->PushReleaseFence(-1);
       }
+    } else {
+      // In case of flush, we don't return an error to f/w, so it will get a release fence out of
+      // the hwc_layer's release fence queue. We should push a -1 to preserve release fence
+      // circulation semantics.
+      hwc_layer->PushReleaseFence(-1);
     }
 
+    layer_buffer->release_fence_fd = -1;
     if (layer_buffer->acquire_fence_fd >= 0) {
       close(layer_buffer->acquire_fence_fd);
       layer_buffer->acquire_fence_fd = -1;
     }
+
+    layer->request.flags = {};
   }
 
+  client_target_->GetSDMLayer()->request.flags = {};
   *out_retire_fence = -1;
   if (!flush_) {
     // if swapinterval property is set to 0 then close and reset the list retire fence
@@ -1264,8 +1297,6 @@ HWC2::Error HWCDisplay::PostCommitLayerStack(int32_t *out_retire_fence) {
 
   geometry_changes_ = GeometryChanges::kNone;
   flush_ = false;
-
-  ClearRequestFlags();
 
   return status;
 }
@@ -1451,10 +1482,9 @@ void HWCDisplay::DumpInputBuffers() {
     auto acquire_fence_fd = layer->input_buffer.acquire_fence_fd;
 
     if (acquire_fence_fd >= 0) {
-      int error = sync_wait(acquire_fence_fd, 1000);
-      if (error < 0) {
-        DLOGW("sync_wait error errno = %d, desc = %s", errno, strerror(errno));
-        return;
+      DisplayError error = buffer_allocator_->MapBuffer(pvt_handle, acquire_fence_fd);
+      if (error != kErrorNone) {
+        continue;
       }
     }
 
@@ -1594,7 +1624,7 @@ int HWCDisplay::SetFrameBufferResolution(uint32_t x_pixels, uint32_t y_pixels) {
 
   // By default UBWC is enabled and below property is global enable/disable for all
   // buffers allocated through gralloc , including framebuffer targets.
-  HWCDebugHandler::Get()->GetProperty("debug.gralloc.gfx_ubwc_disable", &ubwc_disabled);
+  HWCDebugHandler::Get()->GetProperty(DISABLE_UBWC_PROP, &ubwc_disabled);
   if (!ubwc_disabled) {
     usage |= GRALLOC_USAGE_PRIVATE_ALLOC_UBWC;
     flags |= private_handle_t::PRIV_FLAGS_UBWC_ALIGNED;
@@ -1735,13 +1765,15 @@ void HWCDisplay::MarkLayersForGPUBypass() {
 }
 
 void HWCDisplay::MarkLayersForClientComposition() {
-  // ClientComposition - GPU comp, to acheive this, set skip flag so that
+  // ClientComposition - GPU comp, to achieve this, set skip flag so that
   // SDM does not handle this layer and hwc_layer composition will be
   // set correctly at the end of Prepare.
+  DLOGV_IF(kTagClient, "HWC Layers marked for GPU comp");
   for (auto hwc_layer : layer_set_) {
     Layer *layer = hwc_layer->GetSDMLayer();
     layer->flags.skip = true;
   }
+  layer_stack_.flags.skip_present = true;
 }
 
 void HWCDisplay::ApplyScanAdjustment(hwc_rect_t *display_frame) {
@@ -1955,15 +1987,9 @@ void HWCDisplay::CloseAcquireFds() {
   }
 }
 
-void HWCDisplay::ClearRequestFlags() {
-  for (Layer *layer : layer_stack_.layers) {
-    layer->request.flags = {};
-  }
-}
-
 std::string HWCDisplay::Dump() {
   std::ostringstream os;
-  os << "-------------------------------" << std::endl;
+  os << "\n------------HWC----------------\n";
   os << "HWC2 display_id: " << id_ << std::endl;
   for (auto layer : layer_set_) {
     auto sdm_layer = layer->GetSDMLayer();
@@ -1983,30 +2009,50 @@ std::string HWCDisplay::Dump() {
     os << " buffer_id: " << std::hex << "0x" << sdm_layer->input_buffer.buffer_id << std::dec
        << std::endl;
   }
+
+  if (layer_stack_invalid_) {
+    os << "\n Layers added or removed but not reflected to SDM's layer stack yet\n";
+    return os.str();
+  }
+
   if (color_mode_) {
+    os << "\n----------Color Modes---------\n";
     color_mode_->Dump(&os);
   }
-  os << "-------------------------------" << std::endl;
+
+  if (display_intf_) {
+    os << "\n------------SDM----------------\n";
+    os << display_intf_->Dump();
+  }
+
+  os << "\n";
+
   return os.str();
 }
 
 bool HWCDisplay::CanSkipValidate() {
   // Layer Stack checks
   if (layer_stack_.flags.hdr_present && (tone_mapper_ && tone_mapper_->IsActive())) {
+    DLOGV_IF(kTagClient, "HDR content present with tone mapping enabled. Returning false.");
     return false;
   }
 
   if (client_target_->NeedsValidation()) {
+    DLOGV_IF(kTagClient, "Framebuffer target needs validation. Returning false.");
     return false;
   }
 
   for (auto hwc_layer : layer_set_) {
     if (hwc_layer->NeedsValidation()) {
+      DLOGV_IF(kTagClient, "hwc_layer[%d] needs validation. Returning false.",
+               hwc_layer->GetId());
       return false;
     }
 
     // Do not allow Skip Validate, if any layer needs GPU Composition.
     if (hwc_layer->GetDeviceSelectedCompositionType() == HWC2::Composition::Client) {
+      DLOGV_IF(kTagClient, "hwc_layer[%d] is GPU composed. Returning false.",
+               hwc_layer->GetId());
       return false;
     }
   }

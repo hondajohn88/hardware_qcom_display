@@ -1,5 +1,5 @@
 /*
-* Copyright (c) 2014 - 2017, The Linux Foundation. All rights reserved.
+* Copyright (c) 2014 - 2018, The Linux Foundation. All rights reserved.
 *
 * Redistribution and use in source and binary forms, with or without
 * modification, are permitted provided that the following conditions are
@@ -62,8 +62,8 @@ int HWCDisplayPrimary::Create(CoreInterface *core_intf, BufferAllocator *buffer_
 
   hwc_display_primary->GetMixerResolution(&primary_width, &primary_height);
   int width = 0, height = 0;
-  HWCDebugHandler::Get()->GetProperty("sdm.fb_size_width", &width);
-  HWCDebugHandler::Get()->GetProperty("sdm.fb_size_height", &height);
+  HWCDebugHandler::Get()->GetProperty(FB_WIDTH_PROP, &width);
+  HWCDebugHandler::Get()->GetProperty(FB_HEIGHT_PROP, &height);
   if (width > 0 && height > 0) {
     primary_width = UINT32(width);
     primary_height = UINT32(height);
@@ -102,7 +102,7 @@ int HWCDisplayPrimary::Init() {
 
   use_metadata_refresh_rate_ = true;
   int disable_metadata_dynfps = 0;
-  HWCDebugHandler::Get()->GetProperty("persist.metadata_dynfps.disable", &disable_metadata_dynfps);
+  HWCDebugHandler::Get()->GetProperty(DISABLE_METADATA_DYNAMIC_FPS_PROP, &disable_metadata_dynfps);
   if (disable_metadata_dynfps) {
     use_metadata_refresh_rate_ = false;
   }
@@ -113,8 +113,7 @@ int HWCDisplayPrimary::Init() {
   }
   color_mode_ = new HWCColorMode(display_intf_);
   color_mode_->Init();
-  HWCDebugHandler::Get()->GetProperty("vendor.display.enable_default_color_mode",
-                                      &default_mode_status_);
+  HWCDebugHandler::Get()->GetProperty(ENABLE_DEFAULT_COLOR_MODE, &default_mode_status_);
 
   return status;
 }
@@ -173,13 +172,15 @@ HWC2::Error HWCDisplayPrimary::Validate(uint32_t *out_num_types, uint32_t *out_n
     return status;
   }
 
+
+  // Fill in the remaining blanks in the layers and add them to the SDM layerstack
+  BuildLayerStack();
+
   if (color_tranform_failed_) {
     // Must fall back to client composition
     MarkLayersForClientComposition();
   }
 
-  // Fill in the remaining blanks in the layers and add them to the SDM layerstack
-  BuildLayerStack();
   // Checks and replaces layer stack for solid fill
   SolidFillPrepare();
 
@@ -199,7 +200,7 @@ HWC2::Error HWCDisplayPrimary::Validate(uint32_t *out_num_types, uint32_t *out_n
   }
 
   uint32_t refresh_rate = GetOptimalRefreshRate(one_updating_layer);
-  if (current_refresh_rate_ != refresh_rate) {
+  if (current_refresh_rate_ != refresh_rate || handle_idle_timeout_) {
     error = display_intf_->SetRefreshRate(refresh_rate);
   }
 
@@ -213,7 +214,10 @@ HWC2::Error HWCDisplayPrimary::Validate(uint32_t *out_num_types, uint32_t *out_n
   }
 
   if (layer_set_.empty()) {
-    flush_ = true;
+    // Avoid flush for Command mode panel.
+    DisplayConfigFixedInfo display_config;
+    display_intf_->GetConfig(&display_config);
+    flush_ = !display_config.is_cmdmode;
     return status;
   }
 
@@ -228,7 +232,6 @@ HWC2::Error HWCDisplayPrimary::Present(int32_t *out_retire_fence) {
     // If we do not handle the frame set retireFenceFd to outbufAcquireFenceFd
     // Revisit this when validating display_paused
     DisplayError error = display_intf_->Flush();
-    validated_.reset();
     if (error != kErrorNone) {
       DLOGE("Flush failed. Error = %d", error);
     }
@@ -288,7 +291,7 @@ HWC2::Error HWCDisplayPrimary::SetColorTransform(const float *matrix,
   }
 
   auto status = color_mode_->SetColorTransform(matrix, hint);
-  if (status != HWC2::Error::None) {
+  if ((hint != HAL_COLOR_TRANSFORM_IDENTITY) && (status != HWC2::Error::None)) {
     DLOGE("failed for hint = %d", hint);
     color_tranform_failed_ = true;
     return status;
@@ -356,7 +359,7 @@ DisplayError HWCDisplayPrimary::SetDisplayMode(uint32_t mode) {
 void HWCDisplayPrimary::SetMetaDataRefreshRateFlag(bool enable) {
   int disable_metadata_dynfps = 0;
 
-  HWCDebugHandler::Get()->GetProperty("persist.metadata_dynfps.disable", &disable_metadata_dynfps);
+  HWCDebugHandler::Get()->GetProperty(DISABLE_METADATA_DYNAMIC_FPS_PROP, &disable_metadata_dynfps);
   if (disable_metadata_dynfps) {
     return;
   }

@@ -391,10 +391,6 @@ DisplayError HWCDisplay::CECMessage(char *message) {
   return kErrorNone;
 }
 
-DisplayError HWCDisplay::HandleEvent(DisplayEvent event) {
-    return kErrorNone;
-}
-
 int HWCDisplay::AllocateLayerStack(hwc_display_contents_1_t *content_list) {
   if (!content_list || !content_list->numHwLayers) {
     DLOGW("Invalid content list");

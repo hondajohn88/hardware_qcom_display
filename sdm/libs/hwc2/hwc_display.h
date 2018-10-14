@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014-2017, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2014-2018, The Linux Foundation. All rights reserved.
  * Not a Contribution.
  *
  * Copyright 2015 The Android Open Source Project
@@ -122,7 +122,7 @@ class HWCDisplay : public DisplayEventHandler {
   virtual DisplayError SetMixerResolution(uint32_t width, uint32_t height);
   virtual DisplayError GetMixerResolution(uint32_t *width, uint32_t *height);
   virtual void GetPanelResolution(uint32_t *width, uint32_t *height);
-  virtual std::string Dump(void);
+  virtual std::string Dump();
 
   // Captures frame output in the buffer specified by output_buffer_info. The API is
   // non-blocking and the client is expected to check operation status later on.
@@ -210,6 +210,11 @@ class HWCDisplay : public DisplayEventHandler {
                                          float* out_max_luminance,
                                          float* out_max_average_luminance,
                                          float* out_min_luminance);
+  virtual HWC2::Error SetDisplayAnimating(bool animating) {
+    animating_ = animating;
+    validated_ = false;
+    return HWC2::Error::None;
+  }
 
  protected:
   // Maximum number of layers supported by display manager.
@@ -241,7 +246,6 @@ class HWCDisplay : public DisplayEventHandler {
   bool IsLayerUpdating(const Layer *layer);
   uint32_t SanitizeRefreshRate(uint32_t req_refresh_rate);
   virtual void CloseAcquireFds();
-  virtual void ClearRequestFlags();
   virtual void GetUnderScanConfig() { }
 
   enum {
@@ -250,6 +254,7 @@ class HWCDisplay : public DisplayEventHandler {
   };
 
   static std::bitset<kDisplayMax> validated_;
+  bool layer_stack_invalid_ = true;
   CoreInterface *core_intf_ = nullptr;
   HWCCallbacks *callbacks_  = nullptr;
   HWCBufferAllocator *buffer_allocator_ = NULL;
@@ -300,6 +305,7 @@ class HWCDisplay : public DisplayEventHandler {
   DisplayClass display_class_;
   uint32_t geometry_changes_ = GeometryChanges::kNone;
   bool skip_validate_ = false;
+  bool animating_ = false;
 };
 
 inline int HWCDisplay::Perform(uint32_t operation, ...) {

@@ -171,7 +171,6 @@ class HWCDisplay : public DisplayEventHandler {
   virtual DisplayError VSync(const DisplayEventVSync &vsync);
   virtual DisplayError Refresh();
   virtual DisplayError CECMessage(char *message);
-  virtual DisplayError HandleEvent(DisplayEvent event);
 
   int AllocateLayerStack(hwc_display_contents_1_t *content_list);
   void FreeLayerStack();
